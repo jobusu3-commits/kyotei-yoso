@@ -1,7 +1,7 @@
 import re
 import requests
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -37,24 +37,41 @@ def _fetch_odds(rno: str, jcd: str, hd: str) -> dict:
         resp = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
         odds_map = {}
+
+        # 方法1: is-boatColor クラスのtdから艇番取得 → 同行のオッズを探す
         for td in soup.find_all("td", class_=re.compile(r"is-boatColor\d")):
             boat_num = td.get_text(strip=True)
-            if re.match(r'^[1-6]$', boat_num):
-                next_td = td.find_next_sibling("td")
-                if next_td:
+            if not re.match(r'^[1-6]$', boat_num):
+                continue
+            row = td.find_parent("tr")
+            if not row:
+                continue
+            for sibling in row.find_all("td"):
+                text = sibling.get_text(strip=True)
+                if re.match(r'^\d{1,3}\.\d$', text):
                     try:
-                        odds_map[boat_num] = float(next_td.get_text(strip=True))
+                        odds_map[boat_num] = float(text)
+                        break
                     except ValueError:
                         pass
+
+        # 方法2: 全テーブルから艇番+オッズのパターンを探す
         if not odds_map:
-            for table in soup.find_all("table"):
-                for row in table.find_all("tr"):
-                    tds = row.find_all("td")
-                    if len(tds) >= 2:
-                        boat = tds[0].get_text(strip=True)
-                        odds_text = tds[1].get_text(strip=True)
-                        if re.match(r'^[1-6]$', boat) and re.match(r'^\d+\.\d+$', odds_text):
-                            odds_map[boat] = float(odds_text)
+            for row in soup.find_all("tr"):
+                tds = row.find_all("td")
+                for i, td in enumerate(tds):
+                    boat = td.get_text(strip=True)
+                    if not re.match(r'^[1-6]$', boat):
+                        continue
+                    for j in range(i + 1, min(i + 5, len(tds))):
+                        odds_text = tds[j].get_text(strip=True)
+                        if re.match(r'^\d{1,3}\.\d$', odds_text):
+                            try:
+                                odds_map[boat] = float(odds_text)
+                            except ValueError:
+                                pass
+                            break
+
         return odds_map
     except Exception:
         return {}
@@ -89,6 +106,16 @@ def _fetch_weather(rno: str, jcd: str, hd: str) -> dict:
         return default
 
 
+def _extract_floats(text: str) -> list[float]:
+    """テキストからST値を除いた数値を抽出"""
+    vals = []
+    for m in re.finditer(r'\b(\d{1,2}\.\d{2})\b', text):
+        v = float(m.group(1))
+        if v >= 1.0:
+            vals.append(v)
+    return vals
+
+
 def fetch_race_data(url: str) -> tuple[list[dict], dict]:
     rno, jcd, hd = _extract_params(url)
 
@@ -96,7 +123,7 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
     resp.encoding = "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ページ全体から登録番号→選手名マップを事前構築
+    # ページ全体から登録番号→選手名マップを構築
     id_to_name = {}
     for a in soup.find_all("a"):
         href = a.get("href", "")
@@ -107,44 +134,64 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
         if re.search(r'[一-龯ぁ-んァ-ン]{2,}', text):
             id_to_name[toban_m.group(1)] = text
 
-    racers = []
-    seen_courses = set()
-
+    # tobanリンクを持つ行を選手行として特定（td数制限なし）
+    racer_rows = {}  # course -> (row, racer_id)
     for row in soup.find_all("tr"):
-        tds = row.find_all("td")
-        if len(tds) < 9:
-            continue
-
-        try:
-            course = int(tds[0].get_text(strip=True))
-            if not (1 <= course <= 6) or course in seen_courses:
-                continue
-        except ValueError:
-            continue
-
-        seen_courses.add(course)
-
-        # 登録番号を取得してマップから選手名を引く
         racer_id = ""
         for a in row.find_all("a"):
             m = re.search(r'toban=(\d+)', a.get("href", ""))
             if m:
                 racer_id = m.group(1)
                 break
-        name = id_to_name.get(racer_id, "")
+        if not racer_id:
+            continue
 
-        # フォールバック: tobanリンクを含むtdのテキストから直接名前を抽出
+        tds = row.find_all("td")
+        if not tds:
+            continue
+        try:
+            course = int(tds[0].get_text(strip=True))
+            if not (1 <= course <= 6):
+                continue
+        except ValueError:
+            continue
+
+        if course not in racer_rows:
+            racer_rows[course] = (row, racer_id)
+
+    # tobanリンクが取れなかった場合: is-boatColor で補完
+    if len(racer_rows) < 6:
+        for td in soup.find_all("td", class_=re.compile(r"is-boatColor[1-6]")):
+            boat_text = td.get_text(strip=True)
+            if not re.match(r'^[1-6]$', boat_text):
+                continue
+            course = int(boat_text)
+            if course in racer_rows:
+                continue
+            row = td.find_parent("tr")
+            if row:
+                racer_rows[course] = (row, "")
+
+    racers = []
+    all_rows = soup.find_all("tr")
+
+    for course in sorted(racer_rows.keys()):
+        row, racer_id = racer_rows[course]
+
+        # 選手名
+        name = id_to_name.get(racer_id, "")
         if not name:
-            for td in tds:
-                if not any('toban=' in a.get("href", "") for a in td.find_all("a")):
-                    continue
+            # tdのテキストから姓名パターンを探す
+            for td in row.find_all("td"):
                 td_text = td.get_text(separator="\n", strip=True)
                 lines = [l.strip() for l in td_text.split('\n') if l.strip()]
-                jp_parts = [l for l in lines if re.match(r'^[一-龯ぁ-んァ-ン]{1,5}$', l)]
-                if jp_parts:
-                    name = "　".join(jp_parts[:2]) if len(jp_parts) >= 2 else jp_parts[0]
+                jp = [l for l in lines if re.match(r'^[一-龯ぁ-んァ-ン]{1,5}$', l)]
+                if len(jp) >= 2:
+                    name = "　".join(jp[:2])
                     break
-
+                elif len(jp) == 1:
+                    name = jp[0]
+                    break
         if not name:
             name = f"{course}号艇"
 
@@ -154,16 +201,25 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
         if rank_m:
             rank = rank_m.group(1)
 
-        # 数値データ（ST値を除外して勝率・2連率系を取得）
-        float_vals = []
-        for td in tds:
-            text = td.get_text(separator=" ", strip=True)
-            for m in re.finditer(r'\b(\d{1,2}\.\d{2})\b', text):
-                val = float(m.group(1))
-                if val >= 1.0:
-                    float_vals.append(val)
+        # 数値データ: 当該行 + 直後の5行を合算して抽出
+        combined_text = row.get_text(separator=" ")
+        try:
+            row_idx = all_rows.index(row)
+            for i in range(1, 6):
+                if row_idx + i >= len(all_rows):
+                    break
+                next_row = all_rows[row_idx + i]
+                # 次の選手行に達したら停止
+                has_toban = any('toban=' in a.get("href", "") for a in next_row.find_all("a"))
+                has_boat_color = bool(next_row.find("td", class_=re.compile(r"is-boatColor[1-6]")))
+                if has_toban or has_boat_color:
+                    break
+                combined_text += " " + next_row.get_text(separator=" ")
+        except ValueError:
+            pass
 
-        win_vals = [v for v in float_vals if 1.0 <= v <= 9.9]
+        float_vals = _extract_floats(combined_text)
+        win_vals = [v for v in float_vals if 1.0 <= v <= 9.99]
         rate_vals = [v for v in float_vals if v >= 10.0]
 
         def safe(lst, i, default):
@@ -191,7 +247,6 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
 
     racers.sort(key=lambda r: r["course"])
 
-    # 並行取得
     with ThreadPoolExecutor(max_workers=2) as ex:
         f_odds = ex.submit(_fetch_odds, rno, jcd, hd)
         f_weather = ex.submit(_fetch_weather, rno, jcd, hd)
