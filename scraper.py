@@ -30,51 +30,114 @@ def _extract_params(url: str) -> tuple[str, str, str]:
     return rno.group(1), jcd.group(1), hd.group(1)
 
 
-def _fetch_odds(rno: str, jcd: str, hd: str) -> dict:
-    """単勝オッズ {艇番(str): float}"""
-    try:
-        url = f"https://www.boatrace.jp/owpc/pc/race/oddstf?rno={rno}&jcd={jcd}&hd={hd}"
-        resp = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        odds_map = {}
+def _build_id_to_name(soup) -> dict:
+    """ページ内のtobanリンクから登録番号→選手名マップを構築"""
+    id_to_name = {}
+    for a in soup.find_all("a"):
+        href = a.get("href", "")
+        toban_m = re.search(r'toban=(\d+)', href)
+        if not toban_m:
+            continue
+        toban = toban_m.group(1)
+        if toban in id_to_name:
+            continue
 
-        # 方法1: is-boatColor クラスのtdから艇番取得 → 同行のオッズを探す
-        for td in soup.find_all("td", class_=re.compile(r"is-boatColor\d")):
-            boat_num = td.get_text(strip=True)
-            if not re.match(r'^[1-6]$', boat_num):
-                continue
-            row = td.find_parent("tr")
-            if not row:
-                continue
-            for sibling in row.find_all("td"):
-                text = sibling.get_text(strip=True)
-                if re.match(r'^\d{1,3}\.\d$', text):
-                    try:
-                        odds_map[boat_num] = float(text)
+        # アンカーのテキスト
+        text = a.get_text(strip=True)
+        if re.search(r'[一-龯ぁ-んァ-ン]{2,}', text):
+            id_to_name[toban] = text
+            continue
+
+        # 親要素・兄弟要素からも探す
+        parent = a.parent
+        if parent:
+            for elem in [parent] + list(parent.find_next_siblings(limit=2)):
+                t = elem.get_text(strip=True)
+                if re.search(r'[一-龯]{2,}', t) and len(t) <= 12:
+                    id_to_name[toban] = t
+                    break
+
+    return id_to_name
+
+
+def _fetch_odds_page(rno: str, jcd: str, hd: str):
+    """オッズページを取得してBeautifulSoupを返す"""
+    url = f"https://www.boatrace.jp/owpc/pc/race/oddstf?rno={rno}&jcd={jcd}&hd={hd}"
+    resp = requests.get(url, headers=HEADERS, timeout=10)
+    return BeautifulSoup(resp.text, "html.parser")
+
+
+def _fetch_odds_from_soup(soup) -> dict:
+    """オッズページsoupから単勝オッズを取得"""
+    odds_map = {}
+    # is-boatColor td から同じ行のオッズを探す
+    for td in soup.find_all("td", class_=re.compile(r"is-boatColor\d")):
+        boat_num = td.get_text(strip=True)
+        if not re.match(r'^[1-6]$', boat_num):
+            continue
+        row = td.find_parent("tr")
+        if not row:
+            continue
+        for sibling_td in row.find_all("td"):
+            text = sibling_td.get_text(strip=True)
+            if re.match(r'^\d{1,3}\.\d$', text):
+                try:
+                    odds_map[boat_num] = float(text)
+                    break
+                except ValueError:
+                    pass
+
+    # フォールバック: 全テーブルから艇番+オッズパターン
+    if not odds_map:
+        for row in soup.find_all("tr"):
+            tds = row.find_all("td")
+            for i, td in enumerate(tds):
+                boat = td.get_text(strip=True)
+                if not re.match(r'^[1-6]$', boat):
+                    continue
+                for j in range(i + 1, min(i + 5, len(tds))):
+                    t = tds[j].get_text(strip=True)
+                    if re.match(r'^\d{1,3}\.\d$', t):
+                        try:
+                            odds_map[boat] = float(t)
+                        except ValueError:
+                            pass
                         break
-                    except ValueError:
-                        pass
 
-        # 方法2: 全テーブルから艇番+オッズのパターンを探す
-        if not odds_map:
-            for row in soup.find_all("tr"):
-                tds = row.find_all("td")
-                for i, td in enumerate(tds):
-                    boat = td.get_text(strip=True)
-                    if not re.match(r'^[1-6]$', boat):
-                        continue
-                    for j in range(i + 1, min(i + 5, len(tds))):
-                        odds_text = tds[j].get_text(strip=True)
-                        if re.match(r'^\d{1,3}\.\d$', odds_text):
-                            try:
-                                odds_map[boat] = float(odds_text)
-                            except ValueError:
-                                pass
-                            break
+    return odds_map
 
-        return odds_map
-    except Exception:
-        return {}
+
+def _fetch_names_from_odds_page(soup) -> dict:
+    """オッズページから艇番→選手名を取得"""
+    boat_to_name = {}
+    id_to_name = _build_id_to_name(soup)
+
+    for td in soup.find_all("td", class_=re.compile(r"is-boatColor[1-6]")):
+        boat_num = td.get_text(strip=True)
+        if not re.match(r'^[1-6]$', boat_num):
+            continue
+        if boat_num in boat_to_name:
+            continue
+        row = td.find_parent("tr")
+        if not row:
+            continue
+
+        # 行内のtobanリンクから名前を取得
+        for a in row.find_all("a"):
+            m = re.search(r'toban=(\d+)', a.get("href", ""))
+            if m and m.group(1) in id_to_name:
+                boat_to_name[boat_num] = id_to_name[m.group(1)]
+                break
+
+        # tobanなし: 行内の日本語テキストから探す
+        if boat_num not in boat_to_name:
+            for row_td in row.find_all("td"):
+                text = row_td.get_text(strip=True)
+                if re.search(r'[一-龯]{2,}', text) and len(text) <= 12 and text != boat_num:
+                    boat_to_name[boat_num] = text
+                    break
+
+    return boat_to_name
 
 
 def _fetch_weather(rno: str, jcd: str, hd: str) -> dict:
@@ -107,7 +170,6 @@ def _fetch_weather(rno: str, jcd: str, hd: str) -> dict:
 
 
 def _extract_floats(text: str) -> list[float]:
-    """テキストからST値を除いた数値を抽出"""
     vals = []
     for m in re.finditer(r'\b(\d{1,2}\.\d{2})\b', text):
         v = float(m.group(1))
@@ -119,23 +181,26 @@ def _extract_floats(text: str) -> list[float]:
 def fetch_race_data(url: str) -> tuple[list[dict], dict]:
     rno, jcd, hd = _extract_params(url)
 
+    # 出走表ページ取得
     resp = requests.get(url, headers=HEADERS, timeout=15)
     resp.encoding = "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ページ全体から登録番号→選手名マップを構築
-    id_to_name = {}
-    for a in soup.find_all("a"):
-        href = a.get("href", "")
-        toban_m = re.search(r'toban=(\d+)', href)
-        if not toban_m:
-            continue
-        text = a.get_text(strip=True)
-        if re.search(r'[一-龯ぁ-んァ-ン]{2,}', text):
-            id_to_name[toban_m.group(1)] = text
+    # オッズページを並行取得（名前補完・オッズ取得に使う）
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_odds_soup = ex.submit(_fetch_odds_page, rno, jcd, hd)
+        f_weather = ex.submit(_fetch_weather, rno, jcd, hd)
+        odds_soup = f_odds_soup.result()
+        weather = f_weather.result()
 
-    # tobanリンクを持つ行を選手行として特定（td数制限なし）
-    racer_rows = {}  # course -> (row, racer_id)
+    odds_map = _fetch_odds_from_soup(odds_soup)
+    boat_to_name_from_odds = _fetch_names_from_odds_page(odds_soup)
+
+    # 出走表ページから登録番号→名前マップ構築
+    id_to_name = _build_id_to_name(soup)
+
+    # tobanリンクを持つ行を選手行として特定
+    racer_rows = {}
     for row in soup.find_all("tr"):
         racer_id = ""
         for a in row.find_all("a"):
@@ -145,7 +210,6 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
                 break
         if not racer_id:
             continue
-
         tds = row.find_all("td")
         if not tds:
             continue
@@ -155,11 +219,10 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
                 continue
         except ValueError:
             continue
-
         if course not in racer_rows:
             racer_rows[course] = (row, racer_id)
 
-    # tobanリンクが取れなかった場合: is-boatColor で補完
+    # is-boatColor で不足分を補完
     if len(racer_rows) < 6:
         for td in soup.find_all("td", class_=re.compile(r"is-boatColor[1-6]")):
             boat_text = td.get_text(strip=True)
@@ -172,16 +235,22 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
             if row:
                 racer_rows[course] = (row, "")
 
-    racers = []
+    # コースが取れなかった場合は1〜6を全部作る
+    for c in range(1, 7):
+        if c not in racer_rows:
+            racer_rows[c] = (None, "")
+
     all_rows = soup.find_all("tr")
+    racers = []
 
     for course in sorted(racer_rows.keys()):
         row, racer_id = racer_rows[course]
 
-        # 選手名
+        # 選手名: id_to_name → オッズページ補完 → X号艇
         name = id_to_name.get(racer_id, "")
         if not name:
-            # tdのテキストから姓名パターンを探す
+            name = boat_to_name_from_odds.get(str(course), "")
+        if not name and row is not None:
             for td in row.find_all("td"):
                 td_text = td.get_text(separator="\n", strip=True)
                 lines = [l.strip() for l in td_text.split('\n') if l.strip()]
@@ -197,26 +266,28 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
 
         # 階級
         rank = "B1"
-        rank_m = re.search(r'\b(A1|A2|B1|B2)\b', row.get_text())
-        if rank_m:
-            rank = rank_m.group(1)
+        if row is not None:
+            rank_m = re.search(r'\b(A1|A2|B1|B2)\b', row.get_text())
+            if rank_m:
+                rank = rank_m.group(1)
 
-        # 数値データ: 当該行 + 直後の5行を合算して抽出
-        combined_text = row.get_text(separator=" ")
-        try:
-            row_idx = all_rows.index(row)
-            for i in range(1, 6):
-                if row_idx + i >= len(all_rows):
-                    break
-                next_row = all_rows[row_idx + i]
-                # 次の選手行に達したら停止
-                has_toban = any('toban=' in a.get("href", "") for a in next_row.find_all("a"))
-                has_boat_color = bool(next_row.find("td", class_=re.compile(r"is-boatColor[1-6]")))
-                if has_toban or has_boat_color:
-                    break
-                combined_text += " " + next_row.get_text(separator=" ")
-        except ValueError:
-            pass
+        # 数値データ: 当該行 + 直後5行を合算
+        combined_text = ""
+        if row is not None:
+            combined_text = row.get_text(separator=" ")
+            try:
+                row_idx = all_rows.index(row)
+                for i in range(1, 6):
+                    if row_idx + i >= len(all_rows):
+                        break
+                    next_row = all_rows[row_idx + i]
+                    has_toban = any('toban=' in a.get("href", "") for a in next_row.find_all("a"))
+                    has_boat_color = bool(next_row.find("td", class_=re.compile(r"is-boatColor[1-6]")))
+                    if has_toban or has_boat_color:
+                        break
+                    combined_text += " " + next_row.get_text(separator=" ")
+            except ValueError:
+                pass
 
         float_vals = _extract_floats(combined_text)
         win_vals = [v for v in float_vals if 1.0 <= v <= 9.99]
@@ -236,25 +307,16 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
             "local_nirenritsu": safe(rate_vals, 1, 35.0),
             "motor_nirenritsu": safe(rate_vals, 2, 35.0),
             "boat_nirenritsu": safe(rate_vals, 3, 35.0),
-            "odds": 10.0,
+            "odds": odds_map.get(str(course), 10.0),
         })
 
-    if not racers:
+    if not any(r["name"] != f"{r['course']}号艇" for r in racers):
         raise ValueError(
             "出走表データが取得できませんでした。\n"
             "例: https://www.boatrace.jp/owpc/pc/race/racelist?rno=1&jcd=01&hd=20260511"
         )
 
     racers.sort(key=lambda r: r["course"])
-
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        f_odds = ex.submit(_fetch_odds, rno, jcd, hd)
-        f_weather = ex.submit(_fetch_weather, rno, jcd, hd)
-        odds_map = f_odds.result()
-        weather = f_weather.result()
-
-    for r in racers:
-        r["odds"] = odds_map.get(str(r["course"]), 10.0)
 
     race_info = {
         "rno": rno,
