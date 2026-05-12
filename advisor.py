@@ -23,6 +23,18 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
             "理由": f"スコア上位2艇の組み合わせ",
         }
 
+    # 1号艇との2連複（予想1位が1号艇でない場合に追加）
+    if top and top["course"] != 1:
+        boat1 = next((r for r in ranked if r["course"] == 1), None)
+        if boat1:
+            amount = int(budget * 0.15 / 100) * 100
+            nums = sorted([top["course"], 1])
+            result["2連複（1号艇保険）"] = {
+                "買い目": f"{nums[0]}-{nums[1]}",
+                "金額": amount,
+                "理由": f"1コースは2着率が高いため{top['name']}×1号艇を保険で押さえる",
+            }
+
     # 2連単
     if top and second:
         amount = int(budget * 0.15 / 100) * 100
