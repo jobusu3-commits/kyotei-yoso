@@ -54,14 +54,17 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
             "理由": "スコア上位3艇のボックス",
         }
 
-    # 3連単
-    if top and second and third:
-        amount = int(budget * 0.1 / 100) * 100
-        result["3連単"] = {
-            "買い目": f"{top['course']}→{second['course']}→{third['course']}",
-            "金額": amount,
-            "理由": "スコア順に1・2・3着を予想（高配当狙い）",
-        }
+    # 3連単フォーメーション（1着・2着固定、3着を複数候補）
+    if top and second and len(ranked) >= 3:
+        candidates = [r for r in ranked[2:5] if r["course"] not in [top["course"], second["course"]]]
+        unit = max(100, int(budget * 0.1 / max(len(candidates), 1) / 100) * 100)
+        for i, cand in enumerate(candidates):
+            key = "3連単F1" if i == 0 else f"3連単F{i + 1}"
+            result[key] = {
+                "買い目": f"{top['course']}→{second['course']}→{cand['course']}",
+                "金額": unit,
+                "理由": f"1着{top['name']}・2着{second['name']}固定、3着{cand['name']}（{cand['rank']}）",
+            }
 
     # 穴艇込み3連複（複数パターン）
     if anaba and top and second:
