@@ -17,7 +17,8 @@ def _wave_adj(wave: int, wind_speed: int) -> int:
 
 
 def score_course(course: int, jcd: str = "", wave: int = 0, wind_speed: int = 0) -> int:
-    base = {1: 25, 2: 13, 3: 9, 4: 7, 5: 5, 6: 3}.get(course, 3)
+    # 2コース: 2着率約25%と高いため+4、3コース: 2着率約18%のため+2
+    base = {1: 25, 2: 17, 3: 11, 4: 7, 5: 5, 6: 3}.get(course, 3)
     adj = VENUE_COURSE_ADJ.get(jcd, {}).get(course, 0)
     if course == 1:
         adj += _wave_adj(wave, wind_speed)
