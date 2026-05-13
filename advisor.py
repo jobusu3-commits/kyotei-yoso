@@ -6,6 +6,9 @@ def should_skip(ranked: list[dict], jcd: str = "", wave: int = 0, wind_speed: in
     if jcd == "03" and (wave >= 15 or wind_speed >= 8):
         return {"reason": f"江戸川の荒水面（波高{wave}cm・風速{wind_speed}m）は外コース展開が読めません。このレースは見送りを推奨します。"}
     top = ranked[0]
+    # 江戸川は穏やか水面でもまくりが多発するため、本命スコア80点未満は見送り
+    if jcd == "03" and top["score"] < 80:
+        return {"reason": f"江戸川は本命スコアが{top['score']}点（基準80点）では的中率が低い傾向があります。このレースは見送りを推奨します。"}
     if top["score"] < 60:
         return {"reason": f"本命スコアが低すぎます（{top['score']}点 / 基準60点）。混戦の可能性が高く、このレースは見送りを推奨します。"}
     if len(ranked) >= 2:
