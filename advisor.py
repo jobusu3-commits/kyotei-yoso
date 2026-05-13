@@ -4,13 +4,13 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
     second = ranked[1] if len(ranked) >= 2 else None
     third = ranked[2] if len(ranked) >= 3 else None
 
-    # 単勝
-    if top and top["score"] >= 50:
+    # 単勝（オッズ2.0倍以上のみ）
+    if top and top["score"] >= 50 and top.get("odds", 10.0) >= 2.0:
         amount = int(budget * 0.35 / 100) * 100
         result["単勝"] = {
             "買い目": f"{top['course']}号艇 {top['name']}",
             "金額": amount,
-            "理由": f"スコア{top['score']}点。{top['course']}コース×{top['rank']}選手",
+            "理由": f"スコア{top['score']}点。{top['course']}コース×{top['rank']}選手（オッズ{top['odds']}倍）",
         }
 
     # 複勝（2連複ベース）
