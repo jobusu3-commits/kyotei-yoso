@@ -63,8 +63,14 @@ def _build_id_to_name(soup) -> dict:
 def _fetch_odds_page(rno: str, jcd: str, hd: str):
     """オッズページを取得してBeautifulSoupを返す"""
     url = f"https://www.boatrace.jp/owpc/pc/race/oddstf?rno={rno}&jcd={jcd}&hd={hd}"
-    resp = requests.get(url, headers=HEADERS, timeout=10)
-    return BeautifulSoup(resp.text, "html.parser")
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=20)
+            return BeautifulSoup(resp.text, "html.parser")
+        except Exception:
+            if attempt == 2:
+                raise
+    return BeautifulSoup("", "html.parser")
 
 
 def _fetch_odds_from_soup(soup) -> dict:
@@ -145,7 +151,7 @@ def _fetch_weather(rno: str, jcd: str, hd: str) -> dict:
     default = {"weather": "不明", "wind_speed": 0, "wave": 0, "wind_dir": ""}
     try:
         url = f"https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={hd}"
-        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp = requests.get(url, headers=HEADERS, timeout=20)
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator=" ")
 
@@ -182,7 +188,7 @@ def fetch_race_data(url: str) -> tuple[list[dict], dict]:
     rno, jcd, hd = _extract_params(url)
 
     # 出走表ページ取得
-    resp = requests.get(url, headers=HEADERS, timeout=15)
+    resp = requests.get(url, headers=HEADERS, timeout=25)
     resp.encoding = "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
 
