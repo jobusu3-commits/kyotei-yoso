@@ -35,13 +35,18 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
                 "理由": f"1コースは2着率が高いため{top['name']}×1号艇を保険で押さえる",
             }
 
-    # 2連単
+    # 2連単（両方向）
     if top and second:
-        amount = int(budget * 0.15 / 100) * 100
-        result["2連単"] = {
+        unit = max(100, int(budget * 0.15 / 2 / 100) * 100)
+        result["2連単（正）"] = {
             "買い目": f"{top['course']}→{second['course']}",
-            "金額": amount,
+            "金額": unit,
             "理由": f"{top['name']}1着・{second['name']}2着を予想",
+        }
+        result["2連単（逆）"] = {
+            "買い目": f"{second['course']}→{top['course']}",
+            "金額": unit,
+            "理由": f"{second['name']}1着・{top['name']}2着（逆順保険）",
         }
 
     # 3連複
