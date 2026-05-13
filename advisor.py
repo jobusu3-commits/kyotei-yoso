@@ -2,6 +2,9 @@ def should_skip(ranked: list[dict], jcd: str = "", wave: int = 0, wind_speed: in
     """見送り推奨条件をチェック。見送り時はreason dictを、予想OKならNoneを返す"""
     if not ranked:
         return {"reason": "データなし"}
+    # 全選手がデフォルト値 → スクレイピング失敗
+    if all(r["win_rate"] == 5.0 and r["nirenritsu"] == 35.0 for r in ranked):
+        return {"reason": "選手データを取得できませんでした。出走表URLを確認して再実行してください。"}
     # 江戸川の荒水面は外コースのまくり・差しが多発するため見送り
     if jcd == "03" and (wave >= 15 or wind_speed >= 8):
         return {"reason": f"江戸川の荒水面（波高{wave}cm・風速{wind_speed}m）は外コース展開が読めません。このレースは見送りを推奨します。"}

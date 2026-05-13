@@ -59,6 +59,8 @@ with tab_yoso:
             wcols[1].metric("風速", f"{wind_speed}m")
             wcols[2].metric("波高", f"{wave}cm")
             wcols[3].metric("風向", weather.get("wind_dir", "-") or "-")
+            if wind_speed >= 5:
+                st.caption("⚠️ 天候は予想実行時点のデータです。風速5m以上は直前に変化する場合があります。レース前に再実行を推奨します。")
 
         # ランキング表示
         st.markdown("### 🏆 予想ランキング")
