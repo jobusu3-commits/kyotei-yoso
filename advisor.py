@@ -7,8 +7,8 @@ def should_skip(ranked: list[dict]) -> dict | None:
         return {"reason": f"本命スコアが低すぎます（{top['score']}点 / 基準60点）。混戦の可能性が高く、このレースは見送りを推奨します。"}
     if len(ranked) >= 2:
         gap = top["score"] - ranked[1]["score"]
-        # 1位スコアが70点以上なら高確率本命とみなし、差が小さくても見送らない
-        if gap < 8 and top["score"] < 70:
+        # 1位スコアが68点以上なら高確率本命とみなし、差が小さくても見送らない
+        if gap < 8 and top["score"] < 68:
             return {"reason": f"1位と2位のスコア差が小さすぎます（差{gap}点 / 基準8点）。本命が絞れないため、このレースは見送りを推奨します。"}
     return None
 
