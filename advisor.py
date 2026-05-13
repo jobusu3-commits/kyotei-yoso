@@ -7,7 +7,8 @@ def should_skip(ranked: list[dict]) -> dict | None:
         return {"reason": f"本命スコアが低すぎます（{top['score']}点 / 基準60点）。混戦の可能性が高く、このレースは見送りを推奨します。"}
     if len(ranked) >= 2:
         gap = top["score"] - ranked[1]["score"]
-        if gap < 8:
+        # 1位スコアが70点以上なら高確率本命とみなし、差が小さくても見送らない
+        if gap < 8 and top["score"] < 70:
             return {"reason": f"1位と2位のスコア差が小さすぎます（差{gap}点 / 基準8点）。本命が絞れないため、このレースは見送りを推奨します。"}
     return None
 
@@ -18,24 +19,42 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
     second = ranked[1] if len(ranked) >= 2 else None
     third = ranked[2] if len(ranked) >= 3 else None
 
-    # 単勝（オッズ2.0倍以上のみ）
-    if top and top["score"] >= 50 and top.get("odds", 10.0) >= 2.0:
-        amount = int(budget * 0.35 / 100) * 100
-        result["単勝"] = {
-            "買い目": f"{top['course']}号艇 {top['name']}",
-            "金額": amount,
-            "理由": f"スコア{top['score']}点。{top['course']}コース×{top['rank']}選手（オッズ{top['odds']}倍）",
-        }
+    # 単勝（1号艇スコア75点以上は1.5倍以上、それ以外は2.0倍以上）
+    if top and top["score"] >= 50:
+        odds_threshold = 1.5 if (top["course"] == 1 and top["score"] >= 75) else 2.0
+        if top.get("odds", 10.0) >= odds_threshold:
+            amount = int(budget * 0.35 / 100) * 100
+            result["単勝"] = {
+                "買い目": f"{top['course']}号艇 {top['name']}",
+                "金額": amount,
+                "理由": f"スコア{top['score']}点。{top['course']}コース×{top['rank']}選手（オッズ{top['odds']}倍）",
+            }
 
-    # 2連複
+    # 2連複（1号艇スコア70点以上が本命のとき2位・3位に分散）
     if top and second:
-        amount = int(budget * 0.25 / 100) * 100
-        nums = sorted([top["course"], second["course"]])
-        result["2連複"] = {
-            "買い目": f"{nums[0]}-{nums[1]}",
-            "金額": amount,
-            "理由": "スコア上位2艇の組み合わせ",
-        }
+        if top["course"] == 1 and top["score"] >= 70 and third:
+            amount_main = int(budget * 0.15 / 100) * 100
+            amount_sub = int(budget * 0.10 / 100) * 100
+            nums1 = sorted([top["course"], second["course"]])
+            nums2 = sorted([top["course"], third["course"]])
+            result["2連複"] = {
+                "買い目": f"{nums1[0]}-{nums1[1]}",
+                "金額": amount_main,
+                "理由": "1号艇本命軸・2位との組み合わせ",
+            }
+            result["2連複（3位分散）"] = {
+                "買い目": f"{nums2[0]}-{nums2[1]}",
+                "金額": amount_sub,
+                "理由": "1号艇本命軸・3位との組み合わせ（2位予想分散）",
+            }
+        else:
+            amount = int(budget * 0.25 / 100) * 100
+            nums = sorted([top["course"], second["course"]])
+            result["2連複"] = {
+                "買い目": f"{nums[0]}-{nums[1]}",
+                "金額": amount,
+                "理由": "スコア上位2艇の組み合わせ",
+            }
 
     # 1号艇との2連複（1位が1号艇でなく、2位も1号艇でない場合のみ追加）
     if top and top["course"] != 1 and (not second or second["course"] != 1):
