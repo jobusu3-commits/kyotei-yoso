@@ -23,8 +23,8 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
             "理由": f"スコア上位2艇の組み合わせ",
         }
 
-    # 1号艇との2連複（予想1位が1号艇でない場合に追加）
-    if top and top["course"] != 1:
+    # 1号艇との2連複（1位が1号艇でなく、2位も1号艇でない場合のみ追加）
+    if top and top["course"] != 1 and (not second or second["course"] != 1):
         boat1 = next((r for r in ranked if r["course"] == 1), None)
         if boat1:
             amount = int(budget * 0.15 / 100) * 100
@@ -92,9 +92,17 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
                         "理由": f"{ana['name']}（{ana['course']}コース・{ana['rank']}）を穴艇として組み込む",
                     }
                     count += 1
-                    if count >= 3:
+                    if count >= 1:
                         break
-            if count >= 3:
+            if count >= 1:
                 break
+
+    # 予算超過時に3連単マルチを末尾から削除して調整
+    total = sum(v["金額"] for v in result.values())
+    if total > budget:
+        for key in sorted([k for k in result if "3連単M" in k], reverse=True):
+            if sum(v["金額"] for v in result.values()) <= budget:
+                break
+            result.pop(key)
 
     return result
