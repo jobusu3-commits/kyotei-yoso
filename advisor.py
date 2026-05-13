@@ -1,7 +1,10 @@
-def should_skip(ranked: list[dict]) -> dict | None:
+def should_skip(ranked: list[dict], jcd: str = "", wave: int = 0, wind_speed: int = 0) -> dict | None:
     """見送り推奨条件をチェック。見送り時はreason dictを、予想OKならNoneを返す"""
     if not ranked:
         return {"reason": "データなし"}
+    # 江戸川の荒水面は外コースのまくり・差しが多発するため見送り
+    if jcd == "03" and (wave >= 15 or wind_speed >= 8):
+        return {"reason": f"江戸川の荒水面（波高{wave}cm・風速{wind_speed}m）は外コース展開が読めません。このレースは見送りを推奨します。"}
     top = ranked[0]
     if top["score"] < 60:
         return {"reason": f"本命スコアが低すぎます（{top['score']}点 / 基準60点）。混戦の可能性が高く、このレースは見送りを推奨します。"}

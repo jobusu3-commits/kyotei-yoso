@@ -22,6 +22,9 @@ def score_course(course: int, jcd: str = "", wave: int = 0, wind_speed: int = 0)
     base = {1: 25, 2: 17, 3: 11, 4: 7, 5: 5, 6: 3}.get(course, 3)
     adj = VENUE_COURSE_ADJ.get(jcd, {}).get(course, 0)
     if course == 1:
+        # 江戸川の穏やか水面（波高<8cm・風速<5m）では1コース補正を-8→-4に緩和
+        if jcd == "03" and wave < 8 and wind_speed < 5:
+            adj = -4
         adj += _wave_adj(wave, wind_speed)
     return max(1, base + adj)
 

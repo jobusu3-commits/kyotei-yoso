@@ -44,7 +44,7 @@ with tab_yoso:
         ranked = rank_racers(racers, jcd, wave, wind_speed)
         anaba = find_anaba(ranked)
 
-        skip_info = should_skip(ranked)
+        skip_info = should_skip(ranked, jcd, wave, wind_speed)
         if skip_info:
             st.warning(f"⚠️ **見送り推奨:** {skip_info['reason']}")
 
