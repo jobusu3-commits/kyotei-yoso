@@ -4,7 +4,7 @@ from datetime import date
 import streamlit as st
 from scraper import fetch_race_data
 from scorer import rank_racers, find_anaba
-from advisor import advise
+from advisor import advise, should_skip
 
 RESULTS_LOG = os.path.join(os.path.dirname(__file__), "results_log.csv")
 BOAT_COLORS = {1: "🟥", 2: "⬜", 3: "🟦", 4: "🟨", 5: "⬛", 6: "🟩"}
@@ -43,6 +43,11 @@ with tab_yoso:
 
         ranked = rank_racers(racers, jcd, wave, wind_speed)
         anaba = find_anaba(ranked)
+
+        skip_info = should_skip(ranked)
+        if skip_info:
+            st.warning(f"⚠️ **見送り推奨:** {skip_info['reason']}")
+
         advice = advise(ranked, budget, anaba)
 
         st.subheader(f"📍 {race_info['venue']} {race_info['rno']}R　{race_info['date']}")
