@@ -85,11 +85,13 @@ def advise(ranked: list[dict], budget: int, anaba: list[dict] = None) -> dict:
             "金額": unit,
             "理由": f"{top['name']}1着・{second['name']}2着を予想",
         }
-        result["2連単（逆）"] = {
-            "買い目": f"{second['course']}→{top['course']}",
-            "金額": unit,
-            "理由": f"{second['name']}1着・{top['name']}2着（逆順保険）",
-        }
+        # 2位のオッズが5倍未満のときのみ逆を買う（高オッズ穴は1着に来にくいため）
+        if second.get("odds", 10.0) < 5.0:
+            result["2連単（逆）"] = {
+                "買い目": f"{second['course']}→{top['course']}",
+                "金額": unit,
+                "理由": f"{second['name']}1着・{top['name']}2着（逆順保険・オッズ{second.get('odds', 10.0)}倍）",
+            }
 
     # 3連複
     if top and second and third:
